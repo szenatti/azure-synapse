@@ -1,0 +1,174 @@
+{
+    "name": "Create Synapse View",
+    "properties": {
+        "description": "This pipeline will copy tables schema",
+        "activities": [
+            {
+                "name": "GetObjects",
+                "description": "Get objects (tables etc.) from control table required to extract schema",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT *\nFROM @{pipeline().parameters.MainControlTableName}\nwhere CopyEnabled = 1",
+                            "type": "Expression"
+                        },
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "MetadataDrivenCopyTask_y74_ControlDS",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "GetObjectsSchema",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "GetObjects",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('GetObjects').output.value",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "CallNotebookCreateSynapseView",
+                            "type": "SynapseNotebook",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "notebook": {
+                                    "referenceName": "CreateSynapseView",
+                                    "type": "NotebookReference"
+                                },
+                                "parameters": {
+                                    "structure": {
+                                        "value": {
+                                            "value": "@item().TableSourceStructure",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    },
+                                    "viewName": {
+                                        "value": {
+                                            "value": "@concat('vw_',json(item().SourceObjectSettings).schema,'_',json(item().SourceObjectSettings).table)",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    },
+                                    "path": {
+                                        "value": {
+                                            "value": "@concat('AdventureWorksLT/',json(item().SourceObjectSettings).schema,'/',json(item().SourceObjectSettings).table)",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    },
+                                    "datasource": {
+                                        "value": "BronzeDataLake",
+                                        "type": "string"
+                                    }
+                                },
+                                "snapshot": true,
+                                "sparkPool": {
+                                    "referenceName": "DynamicSPool",
+                                    "type": "BigDataPoolReference"
+                                },
+                                "executorSize": "Small",
+                                "conf": {
+                                    "spark.dynamicAllocation.enabled": false,
+                                    "spark.dynamicAllocation.minExecutors": 1,
+                                    "spark.dynamicAllocation.maxExecutors": 1
+                                },
+                                "driverSize": "Small",
+                                "numExecutors": 1
+                            }
+                        },
+                        {
+                            "name": "ScriptCreateView",
+                            "type": "Script",
+                            "dependsOn": [
+                                {
+                                    "activity": "CallNotebookCreateSynapseView",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "linkedServiceName": {
+                                "referenceName": "AzureSqlDatabase_AutoIR",
+                                "type": "LinkedServiceReference",
+                                "parameters": {
+                                    "ServerName": "prod-dataplatform-ondemand.sql.azuresynapse.net",
+                                    "DBName": "ServerlessDB"
+                                }
+                            },
+                            "typeProperties": {
+                                "scripts": [
+                                    {
+                                        "type": "Query",
+                                        "text": {
+                                            "value": "@activity('CallNotebookCreateSynapseView').output.status.Output.result.exitValue",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                ],
+                                "scriptBlockExecutionTimeout": "02:00:00"
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "MainControlTableName": {
+                "type": "String",
+                "defaultValue": "dbo.MainControlTable"
+            }
+        },
+        "variables": {
+            "TableSchemaMappingOutput": {
+                "type": "String"
+            }
+        },
+        "folder": {
+            "name": "MetadataDrivenCopyTask_y74_20230405/Schema"
+        },
+        "annotations": [],
+        "lastPublishTime": "2023-04-13T06:41:11Z"
+    },
+    "type": "Microsoft.Synapse/workspaces/pipelines"
+}

@@ -1,0 +1,226 @@
+{
+    "name": "Schema Extraction",
+    "properties": {
+        "description": "This pipeline will copy tables schema",
+        "activities": [
+            {
+                "name": "GetObjects",
+                "description": "Get objects (tables etc.) from control table required to extract schema",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT *\nFROM @{pipeline().parameters.MainControlTableName}\nwhere CopyEnabled = 1",
+                            "type": "Expression"
+                        },
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "MetadataDrivenCopyTask_y74_ControlDS",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "GetObjectsSchema",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "GetObjects",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('GetObjects').output.value",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "Get Schema",
+                            "type": "GetMetadata",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "dataset": {
+                                    "referenceName": "MetadataDrivenCopyTask_y74_SourceDS",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "cw_schema": {
+                                            "value": "@json(item().SourceObjectSettings).schema",
+                                            "type": "Expression"
+                                        },
+                                        "cw_table": {
+                                            "value": "@json(item().SourceObjectSettings).table",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                },
+                                "fieldList": [
+                                    "structure"
+                                ]
+                            }
+                        },
+                        {
+                            "name": "CallNotebookTableSchemaMapping",
+                            "type": "SynapseNotebook",
+                            "dependsOn": [
+                                {
+                                    "activity": "Get Schema",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "notebook": {
+                                    "referenceName": "TableSchemaMapping",
+                                    "type": "NotebookReference"
+                                },
+                                "parameters": {
+                                    "schema": {
+                                        "value": {
+                                            "value": "@json(item().SourceObjectSettings).schema",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    },
+                                    "table": {
+                                        "value": {
+                                            "value": "@json(item().SourceObjectSettings).table",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    },
+                                    "structure": {
+                                        "value": {
+                                            "value": "@string(activity('Get Schema').output.structure)",
+                                            "type": "Expression"
+                                        },
+                                        "type": "string"
+                                    }
+                                },
+                                "snapshot": true,
+                                "sparkPool": {
+                                    "referenceName": "DynamicSPool",
+                                    "type": "BigDataPoolReference"
+                                },
+                                "executorSize": "Small",
+                                "conf": {
+                                    "spark.dynamicAllocation.enabled": false,
+                                    "spark.dynamicAllocation.minExecutors": 1,
+                                    "spark.dynamicAllocation.maxExecutors": 1
+                                },
+                                "driverSize": "Small",
+                                "numExecutors": 1
+                            }
+                        },
+                        {
+                            "name": "UpdateControlMetadataTableSchema",
+                            "type": "SqlServerStoredProcedure",
+                            "dependsOn": [
+                                {
+                                    "activity": "CallNotebookTableSchemaMapping",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "storedProcedureName": "[dbo].[sp_upd_Schema_MainControlTable]",
+                                "storedProcedureParameters": {
+                                    "Schema": {
+                                        "value": {
+                                            "value": "@json(item().SourceObjectSettings).schema",
+                                            "type": "Expression"
+                                        },
+                                        "type": "String"
+                                    },
+                                    "Table": {
+                                        "value": {
+                                            "value": "@json(item().SourceObjectSettings).table",
+                                            "type": "Expression"
+                                        },
+                                        "type": "String"
+                                    },
+                                    "TableSchema": {
+                                        "value": {
+                                            "value": "@activity('CallNotebookTableSchemaMapping').output.status.Output.result.exitValue",
+                                            "type": "Expression"
+                                        },
+                                        "type": "String"
+                                    },
+                                    "TableSourceStructure": {
+                                        "value": {
+                                            "value": "@string(activity('Get Schema').output.structure)",
+                                            "type": "Expression"
+                                        },
+                                        "type": "String"
+                                    }
+                                }
+                            },
+                            "linkedServiceName": {
+                                "referenceName": "linkedServiceControl",
+                                "type": "LinkedServiceReference"
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "MainControlTableName": {
+                "type": "String",
+                "defaultValue": "dbo.MainControlTable"
+            }
+        },
+        "variables": {
+            "TableSchemaMappingOutput": {
+                "type": "String"
+            }
+        },
+        "folder": {
+            "name": "MetadataDrivenCopyTask_y74_20230405/Schema"
+        },
+        "annotations": [],
+        "lastPublishTime": "2023-04-12T12:53:45Z"
+    },
+    "type": "Microsoft.Synapse/workspaces/pipelines"
+}
